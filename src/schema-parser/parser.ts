@@ -48,6 +48,7 @@ const Equals = createToken({ name: 'Equals', pattern: /==/ })
 const Assign = createToken({ name: 'Assign', pattern: /=/, longer_alt: Equals })
 const Star = createToken({ name: 'Star', pattern: /\*/ })
 const Pipe = createToken({ name: 'Pipe', pattern: /\|/ })
+const Slash = createToken({ name: 'Slash', pattern: /\// })
 
 // Delimiters
 const LParen = createToken({ name: 'LParen', pattern: /\(/ })
@@ -122,6 +123,7 @@ const allTokens = [
   Assign,
   Star,
   Pipe,
+  Slash,
 
   // Delimiters
   LParen,
@@ -188,11 +190,20 @@ export class SpiceDBParser extends CstParser {
     this.CONSUME(Integer, { LABEL: 'right' })
   })
 
+  // Namespaced identifier (namespace/identifier or just identifier)
+  private namespacedIdentifier = this.RULE('namespacedIdentifier', () => {
+    this.CONSUME(Identifier, { LABEL: 'namespace' })
+    this.OPTION(() => {
+      this.CONSUME(Slash)
+      this.CONSUME2(Identifier, { LABEL: 'name' })
+    })
+  })
+
   // Object type definition
   private objectTypeDefinition = this.RULE('objectTypeDefinition', () => {
     this.OPTION(() => this.CONSUME(DocComment))
     this.CONSUME(Definition)
-    this.CONSUME(Identifier, { LABEL: 'name' })
+    this.SUBRULE(this.namespacedIdentifier, { LABEL: 'name' })
     this.CONSUME(LBrace)
     this.MANY(() => {
       this.OR([
@@ -223,7 +234,7 @@ export class SpiceDBParser extends CstParser {
 
   // Single relation type
   private relationType = this.RULE('relationType', () => {
-    this.CONSUME(Identifier, { LABEL: 'typeName' })
+    this.SUBRULE(this.namespacedIdentifier, { LABEL: 'typeName' })
     this.OPTION(() => {
       this.OR([
         {
@@ -235,7 +246,7 @@ export class SpiceDBParser extends CstParser {
         {
           ALT: () => {
             this.CONSUME(Hash)
-            this.CONSUME2(Identifier, { LABEL: 'relation' })
+            this.CONSUME(Identifier, { LABEL: 'relation' })
           },
         },
       ])
@@ -373,6 +384,7 @@ export interface CaveatExpression {
 export interface ObjectTypeDefinition {
   type: 'definition'
   name: string
+  namespace?: string
   docComment?: string
   relations: RelationDeclaration[]
   permissions: PermissionDeclaration[]
@@ -386,6 +398,7 @@ export interface RelationDeclaration {
 
 export interface RelationType {
   typeName: string
+  typeNamespace?: string
   wildcard?: boolean
   relation?: string
 }
@@ -515,9 +528,22 @@ export class SpiceDBVisitor
     }
   }
 
+  namespacedIdentifier(ctx: any): { name: string; namespace?: string } {
+    const namespace = ctx.namespace[0].image
+    
+    if (ctx.name) {
+      // Has namespace/name format
+      const name = ctx.name[0].image
+      return { name, namespace }
+    } else {
+      // Just name format (no namespace)
+      return { name: namespace }
+    }
+  }
+
   objectTypeDefinition(ctx: any): ObjectTypeDefinition {
     const docComment = ctx.DocComment ? ctx.DocComment[0].image : undefined
-    const name = ctx.name[0].image
+    const nameInfo = this.visit(ctx.name[0])
     const relations: RelationDeclaration[] = []
     const permissions: PermissionDeclaration[] = []
 
@@ -531,13 +557,19 @@ export class SpiceDBVisitor
       )
     }
 
-    return {
+    const result: ObjectTypeDefinition = {
       type: 'definition',
-      name,
+      name: nameInfo.name,
       docComment,
       relations,
       permissions,
     }
+
+    if (nameInfo.namespace && nameInfo.namespace !== nameInfo.name) {
+      result.namespace = nameInfo.namespace
+    }
+
+    return result
   }
 
   relationDeclaration(ctx: any): RelationDeclaration {
@@ -563,8 +595,12 @@ export class SpiceDBVisitor
   }
 
   relationType(ctx: any): RelationType {
-    const typeName = ctx.typeName[0].image
-    const result: RelationType = { typeName }
+    const typeNameInfo = this.visit(ctx.typeName[0])
+    const result: RelationType = { typeName: typeNameInfo.name }
+
+    if (typeNameInfo.namespace && typeNameInfo.namespace !== typeNameInfo.name) {
+      result.typeNamespace = typeNameInfo.namespace
+    }
 
     if (ctx.Star) {
       result.wildcard = true

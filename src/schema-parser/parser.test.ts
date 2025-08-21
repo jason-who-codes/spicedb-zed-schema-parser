@@ -364,3 +364,57 @@ describe('parseSpiceDBSchema for 002-schema.zed', () => {
     expect(result).toBeDefined()
   })
 })
+
+describe('parseSpiceDBSchema with namespace prefixes', () => {
+  const namespaceSchema = `
+definition some_namespace/some_object_type {
+    relation viewer: user
+    permission view = viewer
+}
+
+definition user {}
+
+definition another_ns/resource {
+    relation owner: user
+    relation viewer: user | some_namespace/some_object_type#viewer
+    permission read = viewer + owner
+}
+`
+
+  it('should parse definitions with namespace prefixes', () => {
+    const result = parseSpiceDBSchema(namespaceSchema)
+    expect(result.errors).toHaveLength(0)
+    expect(result.ast).toBeDefined()
+
+    if (!result.ast) return
+
+    // Check namespaced definition
+    const namespacedDef = result.ast.definitions.find(d => d.name === 'some_object_type')
+    expect(namespacedDef).toBeDefined()
+    expect(namespacedDef?.type).toBe('definition')
+    if (namespacedDef?.type === 'definition') {
+      expect(namespacedDef.namespace).toBe('some_namespace')
+      expect(namespacedDef.name).toBe('some_object_type')
+      expect(namespacedDef.relations).toHaveLength(1)
+      expect(namespacedDef.permissions).toHaveLength(1)
+    }
+
+    // Check regular definition (no namespace)
+    const regularDef = result.ast.definitions.find(d => d.name === 'user')
+    expect(regularDef).toBeDefined()
+    expect(regularDef?.type).toBe('definition')
+    if (regularDef?.type === 'definition') {
+      expect(regularDef.namespace).toBeUndefined()
+      expect(regularDef.name).toBe('user')
+    }
+
+    // Check another namespaced definition
+    const anotherNamespacedDef = result.ast.definitions.find(d => d.name === 'resource')
+    expect(anotherNamespacedDef).toBeDefined()
+    expect(anotherNamespacedDef?.type).toBe('definition')
+    if (anotherNamespacedDef?.type === 'definition') {
+      expect(anotherNamespacedDef.namespace).toBe('another_ns')
+      expect(anotherNamespacedDef.name).toBe('resource')
+    }
+  })
+})
