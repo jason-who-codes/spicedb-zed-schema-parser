@@ -192,11 +192,22 @@ export class SpiceDBParser extends CstParser {
 
   // Namespaced identifier (namespace/identifier or just identifier)
   private namespacedIdentifier = this.RULE('namespacedIdentifier', () => {
-    this.CONSUME(Identifier, { LABEL: 'namespace' })
-    this.OPTION(() => {
-      this.CONSUME(Slash)
-      this.CONSUME2(Identifier, { LABEL: 'name' })
-    })
+    this.OR([
+      {
+        ALT: () => {
+          // namespace/name format
+          this.CONSUME(Identifier, { LABEL: 'namespace' })
+          this.CONSUME(Slash)
+          this.CONSUME2(Identifier, { LABEL: 'name' })
+        }
+      },
+      {
+        ALT: () => {
+          // just name format
+          this.CONSUME3(Identifier, { LABEL: 'name' })
+        }
+      }
+    ])
   })
 
   // Object type definition
@@ -529,16 +540,9 @@ export class SpiceDBVisitor
   }
 
   namespacedIdentifier(ctx: any): { name: string; namespace?: string } {
-    const namespace = ctx.namespace[0].image
-    
-    if (ctx.name) {
-      // Has namespace/name format
-      const name = ctx.name[0].image
-      return { name, namespace }
-    } else {
-      // Just name format (no namespace)
-      return { name: namespace }
-    }
+    const name = ctx.name[0].image
+    const namespace = ctx.namespace ? ctx.namespace[0].image : undefined
+    return { name, namespace }
   }
 
   objectTypeDefinition(ctx: any): ObjectTypeDefinition {
@@ -565,7 +569,7 @@ export class SpiceDBVisitor
       permissions,
     }
 
-    if (nameInfo.namespace && nameInfo.namespace !== nameInfo.name) {
+    if (nameInfo.namespace) {
       result.namespace = nameInfo.namespace
     }
 
@@ -598,7 +602,7 @@ export class SpiceDBVisitor
     const typeNameInfo = this.visit(ctx.typeName[0])
     const result: RelationType = { typeName: typeNameInfo.name }
 
-    if (typeNameInfo.namespace && typeNameInfo.namespace !== typeNameInfo.name) {
+    if (typeNameInfo.namespace) {
       result.typeNamespace = typeNameInfo.namespace
     }
 
